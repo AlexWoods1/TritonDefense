@@ -1,0 +1,6 @@
+[project]
+name = "tritondefense"
+version = "0.1.0"
+description = "CCTV on wheels: mobile video surveillance with acoustic sensing on an Elegoo UGV for contested reconnaissance (hackathon)."
+requires-python = ">=3.12"
+dependencies = []
