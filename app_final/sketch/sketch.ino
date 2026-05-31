@@ -50,22 +50,27 @@ const unsigned long IR_REPEAT_HIGH_MIN_US = 2000UL;
 const unsigned long IR_REPEAT_HIGH_MAX_US = 2600UL;
 const unsigned long IR_REPEAT_LOW_MIN_US = 400UL;
 const unsigned long IR_REPEAT_LOW_MAX_US = 750UL;
-const unsigned long IR_PULSE_TIMEOUT_US = 30000UL;
+const unsigned long IR_PULSE_TIMEOUT_US = 15000UL;
+// Max wait for the NEC start pulse; must be short so loop() is not blocked ~100 ms idle.
+const unsigned long IR_START_WAIT_US = 4000UL;
 const int SERVO_MIN_US = 500;
 const int SERVO_MAX_US = 2400;
 const unsigned long SERVO_REFRESH_MS = 20;
 
-const unsigned long COMMAND_TIMEOUT_MS = 200;
-const unsigned long PYTHON_TIMEOUT_MS = 20;
-const bool DEBUG_LOGGING = true;
+// NEC repeat while held is ~110 ms; allow several missed polls before stop.
+const unsigned long COMMAND_TIMEOUT_MS = 650;
+// IR is suppressed briefly after a Python *motor* command (not servo tracking).
+const unsigned long PYTHON_MOTOR_TIMEOUT_MS = 20;
+const bool DEBUG_LOGGING = false;
 
 int currentMotion = MOTION_STOP;
 int lastIrMotion = MOTION_STOP;
 int servoAngle = 90;
 bool trackingEnabled = false;
+bool driveActive = false;
 unsigned long lastServoPulseMs = 0;
 unsigned long lastCommandMs = 0;
-unsigned long lastPythonCommandMs = 0;
+unsigned long lastPythonMotorCommandMs = 0;
 
 void configureMotorPins();
 void refreshServo();
@@ -88,6 +93,7 @@ bool readIrSignature(unsigned long *signature12, int *bitCount, bool *isRepeat);
 int motionForIrCode(unsigned long signature12);
 bool isTrackingToggleCode(unsigned long signature12);
 void handleIrInput();
+void notifyDriveActive(bool active);
 
 void setup() {
   configureMotorPins();
@@ -114,15 +120,28 @@ void setup() {
 }
 
 void loop() {
-  handleIrInput();
-  refreshServo();
+  // Drain IR quickly while driving; a single blocked poll used to stall the whole loop.
+  if (currentMotion != MOTION_STOP) {
+    for (int i = 0; i < 4; i++) {
+      handleIrInput();
+    }
+  } else {
+    handleIrInput();
+    refreshServo();
+    delay(1);
+  }
 
-    // stops motors if 300ms passed between last input
   if (currentMotion != MOTION_STOP && millis() - lastCommandMs > COMMAND_TIMEOUT_MS) {
     stopMotors();
   }
+}
 
-  delay(10);
+void notifyDriveActive(bool active) {
+  if (active == driveActive) {
+    return;
+  }
+  driveActive = active;
+  Bridge.notify("drive_active", active ? 1 : 0);
 }
 
 void configureMotorPins() {
@@ -248,6 +267,7 @@ void applyMotion(int motion) {
   currentMotion = motion;
   lastCommandMs = millis();
   logMotion(motion);
+  notifyDriveActive(motion != MOTION_STOP);
 
   if (motion == MOTION_FORWARD) {
     writeMotorGroups(MOTOR_FORWARD, MOTOR_FORWARD, DEFAULT_MOTOR_SPEED);
@@ -268,7 +288,7 @@ int setMotion(int motion) {
     Monitor.println(motionName(motion));
   }
   applyMotion(motion);
-  lastPythonCommandMs = millis();
+  lastPythonMotorCommandMs = millis();
   return currentMotion;
 }
 
@@ -279,7 +299,7 @@ int setMotorGroups(int leftDirection, int rightDirection, int speed) {
   writeMotorGroups(leftDirection, rightDirection, speed);
   currentMotion = MOTION_CUSTOM_OUTPUTS;
   lastCommandMs = millis();
-  lastPythonCommandMs = millis();
+  lastPythonMotorCommandMs = millis();
   return 1;
 }
 
@@ -303,8 +323,7 @@ int setMotorOutputs(int motor1, int motor2, int motor3, int motor4) {
 
 int setServoAngle(int angle) {
   servoAngle = constrain(angle, 0, 180);
-  refreshServo();
-  lastPythonCommandMs = millis();
+  // Pulse in loop() only — blocking here delayed IR motor control.
   if (DEBUG_LOGGING) {
     Monitor.print("python command: set_servo angle=");
     Monitor.print(servoAngle);
@@ -317,6 +336,7 @@ int setServoAngle(int angle) {
 int stopMotors() {
   writeMotorGroups(MOTOR_STOP, MOTOR_STOP, 0);
   currentMotion = MOTION_STOP;
+  notifyDriveActive(false);
   return 1;
 }
 
@@ -325,7 +345,7 @@ int stopFromPython() {
     Monitor.println("python command: stop");
   }
   int result = stopMotors();
-  lastPythonCommandMs = millis();
+  lastPythonMotorCommandMs = millis();
   return result;
 }
 
@@ -346,7 +366,7 @@ bool readIrSignature(unsigned long *signature12, int *bitCount, bool *isRepeat) 
   *isRepeat = false;
   unsigned long raw = 0;
 
-  unsigned long startLow = pulseIn(IR_RECEIVE_PIN, LOW, 100000UL);
+  unsigned long startLow = pulseIn(IR_RECEIVE_PIN, LOW, IR_START_WAIT_US);
   if (!inRange(startLow, IR_START_LOW_MIN_US, IR_START_LOW_MAX_US)) {
     return false;
   }
@@ -430,7 +450,7 @@ void handleIrInput() {
     return;
   }
 
-  // Tracking toggle is handled before the Python-priority guard below, so it
+  // Tracking toggle is handled before the Python motor-priority guard below, so it
   // works even while Python is streaming servo commands. Only act on a fresh
   // press (not held repeats) to avoid flipping the state many times per hold.
   if (!isRepeat && isTrackingToggleCode(signature12)) {
@@ -444,9 +464,9 @@ void handleIrInput() {
     return;
   }
 
-  if (millis() - lastPythonCommandMs <= PYTHON_TIMEOUT_MS) {
+  if (millis() - lastPythonMotorCommandMs <= PYTHON_MOTOR_TIMEOUT_MS) {
     if (DEBUG_LOGGING) {
-      Monitor.println("ir signal ignored: recent python command has control");
+      Monitor.println("ir signal ignored: recent python motor command");
     }
     return;
   }
@@ -459,9 +479,8 @@ void handleIrInput() {
     lastCommandMs = millis();
     if (currentMotion != lastIrMotion) {
       applyMotion(lastIrMotion);
-    } else if (DEBUG_LOGGING) {
-      Monitor.print("ir repeat: hold ");
-      Monitor.println(motionName(lastIrMotion));
+    } else if (currentMotion != MOTION_STOP) {
+      digitalWrite(MOTOR_STANDBY_PIN, HIGH);
     }
     return;
   }
