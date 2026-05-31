@@ -1,7 +1,7 @@
 name: TritonDefense YOLO FINAL
 description: COCO object detection on USB webcam via App Lab video_object_detection brick.
 icon: 📷
-version: "0.7.0"
+version: "0.7.4"
 bricks:
   - arduino:video_object_detection:
       model: yolox-object-detection
