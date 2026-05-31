@@ -1,11 +1,6 @@
 name: TritonDefense YOLO FINAL
-description: COCO object detection on USB webcam via App Lab video_object_detection brick.
+description: Person detection on a USB webcam via a self-hosted Ultralytics YOLO (yolo26s.pt) model.
 icon: 📷
-version: "0.7.0"
+version: "0.8.0"
 bricks:
-  - arduino:video_object_detection:
-      model: yolox-object-detection
-      variables:
-        # UNO Q: /dev/video0-1 are GPU codecs. USB webcams are usually /dev/video2+.
-        VIDEO_DEVICE: /dev/video2
   - arduino:web_ui: {}
