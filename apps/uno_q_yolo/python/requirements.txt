@@ -1,0 +1,1 @@
+# No pip packages — inference runs in the video_object_detection App Lab brick.

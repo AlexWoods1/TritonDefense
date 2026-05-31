@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TritonDefense YOLO</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 1rem;
+        background: #0f1419;
+        color: #e7ecf1;
+      }
+      h1 {
+        font-size: 1.25rem;
+        margin-bottom: 0.75rem;
+      }
+      .layout {
+        display: grid;
+        gap: 1rem;
+      }
+      @media (min-width: 900px) {
+        .layout {
+          grid-template-columns: 2fr 1fr;
+        }
+      }
+      .video-wrap {
+        position: relative;
+        min-height: 240px;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        background: #161b22;
+        overflow: hidden;
+      }
+      #videoPlaceholder {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 240px;
+        color: #8b949e;
+      }
+      #dynamicIframe {
+        width: 100%;
+        height: min(70vh, 768px);
+        border: 0;
+        display: none;
+      }
+      .panel {
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        background: #161b22;
+        padding: 0.75rem;
+      }
+      label {
+        display: block;
+        margin-bottom: 0.35rem;
+        color: #8b949e;
+        font-size: 0.9rem;
+      }
+      input[type="range"] {
+        width: 100%;
+      }
+      #detections {
+        margin-top: 0.75rem;
+        font-size: 0.9rem;
+      }
+      .det-row {
+        padding: 0.35rem 0;
+        border-bottom: 1px solid #21262d;
+      }
+      .status {
+        color: #8b949e;
+        font-size: 0.85rem;
+        margin-bottom: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>TritonDefense YOLO</h1>
+    <p class="status" id="status">Connecting…</p>
+    <div class="layout">
+      <div class="video-wrap">
+        <div id="videoPlaceholder">Searching USB webcam…</div>
+        <iframe id="dynamicIframe" title="Detection stream"></iframe>
+      </div>
+      <div class="panel">
+        <label for="confidenceSlider">Confidence threshold</label>
+        <input
+          type="range"
+          id="confidenceSlider"
+          min="0"
+          max="1"
+          step="0.05"
+          value="0.5"
+        />
+        <div id="detections"></div>
+      </div>
+    </div>
+
+    <script
+      src="https://cdn.socket.io/4.8.1/socket.io.min.js"
+      crossorigin="anonymous"
+    ></script>
+    <script>
+      const statusEl = document.getElementById("status");
+      const placeholderEl = document.getElementById("videoPlaceholder");
+      const iframeEl = document.getElementById("dynamicIframe");
+      const detectionsEl = document.getElementById("detections");
+      const confidenceSlider = document.getElementById("confidenceSlider");
+      const recent = [];
+      const maxRecent = 10;
+
+      const streamUrl = `http://${window.location.hostname}:4912/embed`;
+      let intervalId;
+
+      iframeEl.onload = () => {
+        if (intervalId) clearInterval(intervalId);
+        placeholderEl.style.display = "none";
+        iframeEl.style.display = "block";
+        statusEl.textContent = "Live USB webcam";
+      };
+
+      intervalId = setInterval(() => {
+        iframeEl.src = streamUrl;
+      }, 1000);
+
+      const socket = io();
+
+      socket.on("connect", () => {
+        statusEl.textContent = "Connected — waiting for webcam…";
+      });
+
+      socket.on("disconnect", () => {
+        statusEl.textContent = "Disconnected";
+      });
+
+      socket.on("detection", (data) => {
+        if (!data) return;
+        recent.unshift(data);
+        if (recent.length > maxRecent) recent.length = maxRecent;
+        detectionsEl.innerHTML = recent
+          .map(
+            (d) =>
+              `<div class="det-row">${d.content} ${(d.confidence * 100).toFixed(0)}% · bbox ${(d.bbox || []).join(", ")}</div>`
+          )
+          .join("");
+      });
+
+      confidenceSlider.addEventListener("input", () => {
+        const value = Number(confidenceSlider.value);
+        socket.emit("override_th", value);
+      });
+    </script>
+  </body>
+</html>
