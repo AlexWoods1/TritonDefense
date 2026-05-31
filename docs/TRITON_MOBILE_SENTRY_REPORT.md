@@ -10,6 +10,22 @@
 
 ---
 
+## Implementation status (final build)
+
+**Canonical code:** `app_final (2).zip` (same contents as `app_final/`).
+
+| Planned capability (this report) | Final build |
+|----------------------------------|-------------|
+| Live CCTV + person tracking | **Shipped** — YOLO on UNO Q, servo pan, IR toggle |
+| IR RC navigation (Elegoo V4) | **Shipped** |
+| Acoustic impulse detect + A/V sync | **Not implemented** — no functional audio pipeline |
+| Ultrasonic distance | **Not implemented** |
+| Local recording / cloud upload | **Not implemented** |
+
+The sections below describe **original design intent**. Where they mention acoustic sensing, ultrasonic ranging, or offline/cloud data management, treat those as **concept-only** unless marked shipped in the table above.
+
+---
+
 ## Abstract
 
 TritonDefense proposes **CCTV on wheels**: a **relocatable video sentry** on an **Elegoo robot car** for reconnaissance in **hostile, contested** areas. The platform behaves like a **mobile closed-circuit surveillance node**—**continuous or event-driven video** is the **primary recon product**, supported by **acoustic sensing** for **impulsive events** (e.g., simulated gunfire, bangs, sharp transients) that are **time-aligned** with the video record. An **ultrasonic sensor** provides **distance** to targets or obstacles in the watch sector.

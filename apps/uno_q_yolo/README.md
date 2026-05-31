@@ -1,5 +1,7 @@
 # TritonDefense YOLO — Arduino UNO Q
 
+> **Note:** This folder is an earlier YOLO-only prototype. The **final integrated build** (Elegoo IR RC + servo tracking) is in [`app_final/`](../app_final/) or [`app_final (2).zip`](../app_final%20(2).zip).
+
 COCO object detection on a **USB webcam** using the App Lab **`video_object_detection`** brick (YOLOX Nano).
 
 ## Hardware (required wiring)
@@ -81,6 +83,4 @@ v4l2-ctl --device=/dev/video2 --info
 
 `yolox-object-detection` — COCO 80 classes. For faces only, change model to `face-detection` in `app.yaml`.
 
-## Next step — Elegoo car
-
-Extend `sketch/sketch.ino` and use `Bridge` from `python/main.py` when a target (e.g. `person`) is off-center.
+For Elegoo car integration (IR RC, servo pan, tracking toggle), use [`app_final/`](../app_final/) instead.
