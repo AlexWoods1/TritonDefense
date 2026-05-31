@@ -12,6 +12,9 @@ except ImportError:
 
 
 PERSON_CLASS_ID = 0
+DEFAULT_INITIAL_SWIVEL_ANGLE = 0.0
+DEFAULT_UNWIND_THRESHOLD_DEGREES = 175.0
+DEFAULT_UNWIND_DELTA_DEGREES = 360.0
 
 
 @dataclass
@@ -121,6 +124,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-step-degrees", type=float, default=8.0)
     parser.add_argument("--integral-limit", type=float, default=30.0)
     parser.add_argument("--deadband-degrees", type=float, default=1.5)
+    parser.add_argument("--initial-angle", type=float, default=DEFAULT_INITIAL_SWIVEL_ANGLE)
+    parser.add_argument(
+        "--unwind-threshold",
+        type=float,
+        default=DEFAULT_UNWIND_THRESHOLD_DEGREES,
+        help="Estimated swivel angle where the camera should do a full untwist turn.",
+    )
+    parser.add_argument(
+        "--unwind-degrees",
+        type=float,
+        default=DEFAULT_UNWIND_DELTA_DEGREES,
+        help="Full-turn correction sent when the cable limit is reached.",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -154,6 +170,8 @@ def main() -> None:
     cap = cv2.VideoCapture(args.camera)
     min_send_interval = 1.0 / args.send_hz
     last_send_at = 0.0
+    swivel_angle = args.initial_angle
+    send_yaw_delta(serial_connection, 0.0)
 
     try:
         while True:
@@ -171,7 +189,26 @@ def main() -> None:
             yaw_delta = 0.0
             target_found = target is not None
 
-            if target_found:
+            if abs(swivel_angle) >= args.unwind_threshold:
+                yaw_delta = (
+                    -args.unwind_degrees
+                    if swivel_angle > 0
+                    else args.unwind_degrees
+                )
+                send_yaw_delta(serial_connection, yaw_delta)
+                last_send_at = now
+                swivel_angle = args.initial_angle
+                pid.reset()
+                cv2.putText(
+                    frame,
+                    f"untwisting cable {yaw_delta:.1f} deg",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 165, 255),
+                    2,
+                )
+            elif target_found:
                 x1, y1, x2, y2, confidence, _class_id = target.tolist()
                 target_center_x = (x1 + x2) / 2.0
                 pixel_error = target_center_x - frame_center_x
@@ -196,7 +233,10 @@ def main() -> None:
                 )
                 cv2.putText(
                     frame,
-                    f"person {confidence:.2f} error {error_degrees:.1f} deg",
+                    (
+                        f"person {confidence:.2f} error {error_degrees:.1f} deg "
+                        f"swivel {swivel_angle:.1f} deg"
+                    ),
                     (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.7,
@@ -226,6 +266,7 @@ def main() -> None:
 
             if now - last_send_at >= min_send_interval:
                 send_yaw_delta(serial_connection, yaw_delta)
+                swivel_angle += yaw_delta
                 last_send_at = now
 
             if cv2.waitKey(1) & 0xFF == ord("q"):
