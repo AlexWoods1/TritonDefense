@@ -1,1 +1,3 @@
-# No pip packages — inference runs in the video_object_detection App Lab brick.
+# Self-hosted inference with Ultralytics YOLO (yolo26s.pt) on USB webcam frames.
+ultralytics
+opencv-python

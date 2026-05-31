@@ -254,9 +254,9 @@ void applyMotion(int motion) {
   } else if (motion == MOTION_BACKWARD) {
     writeMotorGroups(MOTOR_BACKWARD, MOTOR_BACKWARD, DEFAULT_MOTOR_SPEED);
   } else if (motion == MOTION_LEFT) {
-    writeMotorGroups(MOTOR_BACKWARD, MOTOR_FORWARD, DEFAULT_MOTOR_SPEED);
+    writeMotorGroups(MOTOR_BACKWARD, MOTOR_FORWARD, DEFAULT_MOTOR_SPEED / 4);
   } else if (motion == MOTION_RIGHT) {
-    writeMotorGroups(MOTOR_FORWARD, MOTOR_BACKWARD, DEFAULT_MOTOR_SPEED);
+    writeMotorGroups(MOTOR_FORWARD, MOTOR_BACKWARD, DEFAULT_MOTOR_SPEED / 4);
   } else {
     stopMotors();
   }
