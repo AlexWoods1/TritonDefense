@@ -2,10 +2,11 @@
 ## Technical Concept Report — Mobile Video Surveillance with Acoustic Sensing for Contested Reconnaissance
 
 **Document ID:** TD-COW-003  
-**Version:** 3.0 (Hackathon Draft)  
+**Version:** 3.1 (Implementation Update)  
 **Classification:** Unclassified — Competition / Educational Use  
 **Prepared for:** Military-Themed Autonomous Vehicle Hackathon  
 **Organization:** TritonDefense  
+**Last updated:** 2026-05-30
 
 ---
 
@@ -32,6 +33,8 @@ TritonDefense proposes **CCTV on wheels**: a **relocatable video sentry** on an 
 The vehicle does **not** perform **shot triangulation** or use **thermal** or **infrared** sensing in this design. **Navigation** is **remote control (RC)** only. **Autonomous tracking mode** provides **yaw-only** follow of personnel—the chassis **does not translate on its own** during watch; only **steering** is autonomous.
 
 Under optional **jamming**, video and acoustic data are **stored locally** and **uploaded to the cloud** after the operator **RCs** the unit back to connectivity. This report covers CONOPS, architecture, CCTV pipeline, acoustic subsystem, dual-mode control, data management, demonstration, and limitations.
+
+**v3.1 update:** A **consolidated Arduino UNO Q App Lab application** (`apps/uno_q_yolo`) is implemented in the repository — **COCO object detection** on a **USB webcam** with a **browser UI**, using the App Lab **`video_object_detection`** brick. Elegoo motor, acoustic, and cloud subsystems remain planned.
 
 ---
 
@@ -92,6 +95,20 @@ The **vehicle is the CCTV node**. **Video** is the main input; **acoustic** adds
 - RC navigation; **turn-only** autonomous tracking in watch mode  
 - Local logging and cloud upload  
 - Hackathon demonstration  
+
+**Implemented in repository (v3.1 bench prototype):**
+
+- **Single Arduino UNO Q App Lab application** (`apps/uno_q_yolo`) — consolidated vision stack with no separate scripts, pip dependencies, or bundled model weights on the board  
+- **COCO object detection** on a **USB webcam** via the App Lab **`video_object_detection`** brick (YOLOX Nano)  
+- **Browser UI** at port 7000 with live annotated video (port 4912) and detection feed  
+- **MCU Bridge stub** in `sketch/sketch.ino` for future yaw/motor commands to the Elegoo chassis  
+- **PC development reference** (`from_site.py`) — YOLOv5 webcam demo for algorithm tuning off-board  
+
+**Planned (not yet integrated in the single app):**
+
+- Elegoo RC firmware, drive lock, ultrasonic, and acoustic subsystems  
+- Yaw tracking driven by person `bearing_error` from detections  
+- SD logging, event clips, and cloud upload timeline  
 
 **Out of scope (hackathon v1):**
 
@@ -305,13 +322,18 @@ The **camera** delivers **CCTV-style** recon:
 
 ### 6.3 Vision Processing (Hackathon Tiers)
 
-| Tier | Hardware | Capability |
-|------|----------|------------|
-| A | Serial camera + Arduino | Motion-based CCTV; limited track |
-| B | ESP32-CAM / Pi | Person detect + track + clip filenames |
-| C | Pi + ML | Stable person class for demo |
+| Tier | Hardware | Capability | Status |
+|------|----------|------------|--------|
+| A | Serial camera + Arduino | Motion-based CCTV; limited track | Planned |
+| B | ESP32-CAM / Pi | Person detect + track + clip filenames | Optional path |
+| C | Pi + ML | Stable person class for demo | Optional path |
+| **D (current bench)** | **Arduino UNO Q + USB webcam** | **COCO detect via App Lab brick; web UI; Bridge-ready MCU sketch** | **Implemented** (`apps/uno_q_yolo`) |
 
-**Recommendation:** Tier **B** for credible **CCTV on wheels** demo.
+**Current implementation:** Tier **D** delivers a **single importable App Lab project** on the UNO Q Linux side (MPU). Inference runs in the App Lab **`video_object_detection`** container (YOLOX, 80 COCO classes). A **powered USB-C hub** is required — the UNO Q cannot host a UVC webcam on its USB-C port alone. Detection callbacks in `python/main.py` feed the browser UI; `sketch/sketch.ino` holds the **Router Bridge** link for future motor/yaw commands to the Elegoo MCU.
+
+**PC reference:** `from_site.py` at the repository root runs **YOLOv5** on a development machine webcam. It is **not** deployed to the board and exists for off-line tuning and comparison only.
+
+**Recommendation for full demo:** Tier **D** for live person detection today; integrate Tier **D** bearing output with Elegoo yaw firmware (Section 13) for tracking mode.
 
 ### 6.4 Tracking → Yaw
 
@@ -517,31 +539,76 @@ Foam windscreen; mic isolated from chassis vibration; **motors off** during watc
 
 ## 13. Software Architecture (Arduino-Centric)
 
-### 13.1 Partition
+### 13.1 Current Repository Layout
 
-| Board | Tasks |
-|-------|--------|
-| Arduino (Elegoo) | RC, modes, drive lock, ultrasonic, acoustic ISR/threshold, log, upload trigger |
-| ESP32-CAM / Pi | CCTV capture, buffer, person track, clip files, time sync to Arduino |
+The vision stack is consolidated as **one Arduino App Lab application**:
 
-### 13.2 Modules
+```text
+apps/uno_q_yolo/
+├── app.yaml              # Manifest: video_object_detection + web_ui bricks
+├── python/main.py        # Detection → UI bridge (no pip packages)
+├── sketch/sketch.ino     # MCU Bridge stub (UNO Q Zephyr)
+├── assets/index.html     # Browser UI (video + detection panel)
+└── README.md             # Hub wiring, VIDEO_DEVICE, run steps
+```
+
+Import **`apps/uno_q_yolo`** or **`apps/uno_q_yolo.zip`** in App Lab. Open **`http://<uno-q-ip>:7000`** after Run.
+
+### 13.2 Partition (Target vs. Current)
+
+| Board | Target tasks | Current status |
+|-------|--------------|----------------|
+| **Arduino UNO Q (MPU / Linux)** | CCTV inference, web UI, event log, upload trigger | **Live:** YOLOX detection + web UI via App Lab bricks |
+| **Arduino UNO Q (MCU / Zephyr)** | Bridge to Elegoo motor controller | **Stub:** `Bridge.begin()` in `sketch.ino` |
+| **Elegoo Arduino (car MCU)** | RC, modes, drive lock, ultrasonic, acoustic ISR, log | **Planned** — not yet wired to the App Lab app |
+| **ESP32-CAM / Pi (optional)** | HTTP MJPEG stream, SD clips | **Optional** — not used by current single-app build |
+
+### 13.3 UNO Q App Lab Stack (Implemented)
+
+| Component | Responsibility |
+|-----------|----------------|
+| `app.yaml` | Declares `video_object_detection` (model: `yolox-object-detection`) and `web_ui` bricks; sets `VIDEO_DEVICE` (default `/dev/video2`) |
+| `VideoObjectDetection` brick | Runs inference in App Lab container — **no PyTorch/Ultralytics on MPU** |
+| `python/main.py` | Forwards detection labels, confidence, and bounding boxes to the Web UI; handles confidence slider |
+| `assets/index.html` | Embeds live annotated stream (`:4912/embed`); lists recent detections |
+| `sketch/sketch.ino` | Initializes **Router Bridge** for future serial/MsgPack commands to MCU |
+
+**Configuration (no code changes required for basic run):**
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `VIDEO_DEVICE` | `/dev/video2` in `app.yaml` | V4L2 path for USB webcam (not `/dev/video0`–`1`, which are GPU codecs) |
+| `TRITON_YOLO_CONF` | `0.5` | Initial detection confidence threshold |
+
+### 13.4 Elegoo Firmware Modules (Planned)
+
+When the car MCU is integrated via Bridge, the following modules apply:
 
 | Module | Responsibility |
 |--------|----------------|
 | `rc_input.cpp` | RC decode, mode switch |
 | `motor_drive.cpp` | RC drive; yaw; drive lock |
 | `acoustic.cpp` | Impulse detect, timestamps |
-| `vision_link.cpp` | Bearing error, clip commands |
+| `vision_link.cpp` | Bearing error from detections, clip commands |
 | `av_sync.cpp` | Shared clock, mark frames |
 | `ultrasonic.cpp` | Range filter |
 | `cctv_record.cpp` | Buffer/segment (companion) |
 | `log.cpp` / `upload.cpp` | SD + HTTPS |
 
-### 13.3 Testing Hooks
+**Next integration step:** When a `person` detection is off-center in `main.py`, send yaw commands over **Bridge** to `sketch.ino`, then to the Elegoo motor driver — enabling watch-mode **yaw-only** tracking (Section 9.2).
 
-- `SIM_AUDIO` — inject impulse  
-- `SIM_MARK` — fake video frame mark  
-- LED: amber = watch, blue = tracking, red = acoustic trigger  
+### 13.5 PC Development Reference
+
+| Artifact | Role |
+|----------|------|
+| `from_site.py` | YOLOv5 webcam demo on developer PC — algorithm reference only |
+| `main.py` / `pyproject.toml` | Python tooling scaffold for repo |
+
+### 13.6 Testing Hooks
+
+- **Live:** App Lab Run → browser UI at `:7000`; annotated stream at `:4912`  
+- **Webcam missing:** SSH → `v4l2-ctl --list-devices`; adjust `VIDEO_DEVICE` in `app.yaml`  
+- **Future:** `SIM_AUDIO`, `SIM_MARK`, LED mode indicators on Elegoo MCU  
 
 ---
 
@@ -617,14 +684,14 @@ RC E-stop; no live fire; acoustic demo levels within venue limits.
 
 ### 17.1 Work Packages
 
-| WP | Deliverable |
-|----|-------------|
-| WP1 | RC + drive lock |
-| WP2 | CCTV record + buffer |
-| WP3 | Acoustic detect + sync |
-| WP4 | Yaw tracking + ultrasonic |
-| WP5 | Cloud timeline UI |
-| WP6 | Full demo |
+| WP | Deliverable | Status |
+|----|-------------|--------|
+| WP1 | RC + drive lock | Planned |
+| WP2 | CCTV record + buffer / live object detection | **Partial — UNO Q App Lab YOLO live on USB webcam** |
+| WP3 | Acoustic detect + sync | Planned |
+| WP4 | Yaw tracking + ultrasonic | Planned (Bridge stub in place) |
+| WP5 | Cloud timeline UI | Planned |
+| WP6 | Full demo | In progress |
 
 ### 17.2 Timeline
 
@@ -642,8 +709,9 @@ RC E-stop; no live fire; acoustic demo levels within venue limits.
 | R1 | SD bandwidth | Short clips, ESP32-CAM |
 | R2 | A/V desync | Shared epoch test |
 | R3 | Wind false triggers | Threshold + windscreen |
-| R4 | Vision too slow | Pi companion |
+| R4 | Vision too slow | **UNO Q App Lab brick (no on-board PyTorch); Pi companion if needed** |
 | R5 | Drive creep | Interlock test |
+| R6 | USB webcam not visible on UNO Q | Powered USB-C hub; set `VIDEO_DEVICE` in `app.yaml` |
 
 ---
 
@@ -660,7 +728,9 @@ RC E-stop; no live fire; acoustic demo levels within venue limits.
 
 ## 19. Conclusion
 
-TritonDefense **CCTV on wheels** (v3) is a **video-first mobile surveillance** node on **Elegoo** hardware with an **acoustic channel** for **impulse detection** synchronized to the **CCTV timeline**. **Ultrasonic** ranging adds context; **RC** handles all translation; **tracking mode** provides **yaw-only** follow. The design fits a **hackathon** evidence story—judges review **what the camera saw** and **what the microphone caught**—without claiming **shot triangulation** or **thermal/IR** sensing in v1.
+TritonDefense **CCTV on wheels** (v3.1) is a **video-first mobile surveillance** node on **Elegoo** hardware with an **acoustic channel** for **impulse detection** synchronized to the **CCTV timeline**. **Ultrasonic** ranging adds context; **RC** handles all translation; **tracking mode** provides **yaw-only** follow. The design fits a **hackathon** evidence story—judges review **what the camera saw** and **what the microphone caught**—without claiming **shot triangulation** or **thermal/IR** sensing in v1.
+
+**Implementation progress (2026-05-30):** The repository now ships a **single consolidated Arduino UNO Q App Lab application** (`apps/uno_q_yolo`) that runs **COCO object detection** on a **USB webcam** with a **browser-based CCTV-style UI**. No separate Python scripts, pip installs, or model weights are required on the board. The **MCU Bridge sketch** and **Elegoo motor/acoustic firmware** remain the next integration step toward full watch-mode tracking.
 
 ---
 
@@ -695,11 +765,14 @@ TritonDefense **CCTV on wheels** (v3) is a **video-first mobile surveillance** n
 | Item | Qty | Note |
 |------|-----|------|
 | Elegoo Smart Robot Car kit | 1+ | Chassis, ultrasonic, Arduino |
-| Camera (ESP32-CAM or Pi Camera) | 1 | **CCTV** primary |
+| **Arduino UNO Q (2 GB or 4 GB)** | **1** | **Current vision bench — App Lab MPU + Bridge MCU** |
+| **USB webcam (UVC)** | **1** | **COCO detection input for `apps/uno_q_yolo`** |
+| **Powered USB-C hub** | **1** | **Required — UNO Q cannot host webcam on USB-C alone** |
+| Camera (ESP32-CAM or Pi Camera) | 1 | Optional alternate CCTV path (HTTP MJPEG) |
 | Electret or MEMS microphone + amp | 1 | **Acoustic** |
 | microSD | 1 | Video + logs |
 | RC transmitter + receiver | 1 | Navigation |
-| ESP32/Pi | 1 | Record + sync |
+| ESP32/Pi | 1 | Optional record + sync companion |
 | Mic windscreen | 1 | Outdoor demo |
 
 **Not in v1:** thermal, IR, multi-car TDOA harness.

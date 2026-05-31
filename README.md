@@ -69,7 +69,7 @@ Python **3.12+** with [uv](https://github.com/astral-sh/uv) (see `.python-versio
 
 ```bash
 uv sync
-uv run python main.py
+uv run python from_site.py   # PC webcam YOLOv5 demo (dev reference)
 ```
 
 Firmware and vision on the UNO Q run through **App Lab**, not this repo’s `main.py`.
